@@ -19,7 +19,8 @@ klik op **Meer informatie** en dan op **Toch uitvoeren**.
 
 1. Pas de code aan in `src/` en zet de wijziging op GitHub (commit + push naar `main`).
 2. Ga naar **Releases → Draft a new release**.
-3. Typ bij **Choose a tag** een nieuw versienummer, bijv. `v2.4.0`, en kies *Create new tag*.
+3. Typ bij **Choose a tag** een nieuw versienummer in de vorm `vX.Y.Z`, bijv. `v2.4.0`
+   (altijd hoger dan de vorige!), en kies *Create new tag*. Andere namen worden geweigerd.
    Vul eventueel een titel en beschrijving in en klik **Publish release**.
 4. GitHub Actions bouwt automatisch de installer en zet `Video-Audio-Converter-Setup.exe`
    bij die release (zie het tabblad **Actions**, duurt ± 2 minuten).

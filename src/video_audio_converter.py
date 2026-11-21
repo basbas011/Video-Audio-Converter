@@ -29,7 +29,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 APP_NAME = "Video/Audio Converter"
-APP_VERSION = "2.3.0"   # wordt bij een release automatisch gezet vanuit de git-tag
+APP_VERSION = "2.3.1"   # wordt bij een release automatisch gezet vanuit de git-tag
 
 # GitHub-repository waar nieuwe versies (Releases) van dit programma staan.
 # Moet een openbare repository zijn. Leeg laten = niet controleren op updates.
@@ -147,8 +147,11 @@ def save_settings(s):
 # --------------------------------------------------------------------------- #
 
 def parse_version(text):
-    nums = [int(n) for n in re.findall(r"\d+", text or "")[:3]]
-    return tuple(nums + [0] * (3 - len(nums)))
+    """'v2.4.0' / '2.4' -> (2, 4, 0). Alles wat geen echt versienummer is -> None."""
+    m = re.fullmatch(r"[vV]?(\d+)\.(\d+)(?:\.(\d+))?", (text or "").strip())
+    if not m:
+        return None
+    return tuple(int(n or 0) for n in m.groups())
 
 
 def check_app_update():
@@ -161,7 +164,9 @@ def check_app_update():
     with urllib.request.urlopen(req, timeout=15) as resp:
         data = json.load(resp)
     tag = data.get("tag_name", "")
-    if parse_version(tag) <= parse_version(APP_VERSION):
+    latest, current = parse_version(tag), parse_version(APP_VERSION)
+    # tags zonder geldig versienummer (bijv. "mp3") negeren
+    if latest is None or current is None or latest <= current:
         return None
     for asset in data.get("assets", []):
         if asset.get("name") == SETUP_ASSET:
