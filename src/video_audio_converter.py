@@ -148,7 +148,7 @@ def save_settings(s):
 
 def parse_version(text):
     """'v2.4.0' / '2.4' -> (2, 4, 0). Alles wat geen echt versienummer is -> None."""
-    m = re.fullmatch(r"[vV]?(\d+)\.(\d+)(?:\.(\d+))?", (text or "").strip())
+    m = re.fullmatch(r"[vV]?\.?(\d+)\.(\d+)(?:\.(\d+))?", (text or "").strip())
     if not m:
         return None
     return tuple(int(n or 0) for n in m.groups())

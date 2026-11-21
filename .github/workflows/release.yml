@@ -25,7 +25,7 @@ jobs:
       - name: Versienummer controleren
         run: |
           TAG="${{ github.event.release.tag_name }}"
-          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if ! [[ "$TAG" =~ ^[vV]?\.?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::De tag '$TAG' is geen versienummer. Gebruik bijv. v2.4.0"
             exit 1
           fi
@@ -33,7 +33,7 @@ jobs:
       - name: Installer bouwen
         run: |
           TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
+          VERSION="$(echo "$TAG" | sed -E 's/^[vV]?\.?//')"
           PYTHON=python bash scripts/build_installer.sh "$VERSION"
 
       - name: Installer aan de release toevoegen
