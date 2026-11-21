@@ -44,3 +44,7 @@ De installer wordt gebouwd op Linux met NSIS: `scripts/build_installer.sh <versi
 ## Let op
 
 Download alleen materiaal waarvoor je toestemming hebt of dat vrij te gebruiken is.
+
+## Licentie
+
+MIT – zie [LICENSE](LICENSE). © 2026 Bas Verbeek
