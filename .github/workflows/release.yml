@@ -1,0 +1,36 @@
+name: Release bouwen
+
+# Start automatisch zodra je een versie-tag pusht, bijv.:
+#   git tag v2.3.0
+#   git push origin v2.3.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: NSIS installeren
+        run: sudo apt-get update -q && sudo apt-get install -y -q nsis
+
+      - name: Installer bouwen
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PYTHON=python bash scripts/build_installer.sh "$VERSION"
+
+      - name: Release publiceren
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Video/Audio Converter ${{ github.ref_name }}
+          files: dist/Video-Audio-Converter-Setup.exe
+          generate_release_notes: true
