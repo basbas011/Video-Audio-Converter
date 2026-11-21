@@ -1,11 +1,10 @@
 name: Release bouwen
 
-# Start automatisch zodra je een versie-tag pusht, bijv.:
-#   git tag v2.3.0
-#   git push origin v2.3.0
+# Start automatisch zodra je op GitHub een release publiceert
+# (Releases -> Draft a new release -> tag bijv. v2.4.0 -> Publish release).
 on:
-  push:
-    tags: ["v*"]
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -25,12 +24,12 @@ jobs:
 
       - name: Installer bouwen
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
           PYTHON=python bash scripts/build_installer.sh "$VERSION"
 
-      - name: Release publiceren
+      - name: Installer aan de release toevoegen
         uses: softprops/action-gh-release@v2
         with:
-          name: Video/Audio Converter ${{ github.ref_name }}
+          tag_name: ${{ github.event.release.tag_name }}
           files: dist/Video-Audio-Converter-Setup.exe
-          generate_release_notes: true

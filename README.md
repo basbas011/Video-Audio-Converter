@@ -17,15 +17,13 @@ klik op **Meer informatie** en dan op **Toch uitvoeren**.
 
 ## Een nieuwe versie uitbrengen
 
-1. Pas de code aan in `src/` en commit.
-2. Maak een versie-tag aan en push hem:
-   ```
-   git tag v2.4.0
-   git push origin v2.4.0
-   ```
-3. GitHub Actions bouwt automatisch de installer en zet hem bij **Releases**
-   (zie het tabblad **Actions** voor de voortgang, duurt ± 2 minuten).
-4. Geïnstalleerde programma's zien de nieuwe versie bij de volgende start en tonen
+1. Pas de code aan in `src/` en zet de wijziging op GitHub (commit + push naar `main`).
+2. Ga naar **Releases → Draft a new release**.
+3. Typ bij **Choose a tag** een nieuw versienummer, bijv. `v2.4.0`, en kies *Create new tag*.
+   Vul eventueel een titel en beschrijving in en klik **Publish release**.
+4. GitHub Actions bouwt automatisch de installer en zet `Video-Audio-Converter-Setup.exe`
+   bij die release (zie het tabblad **Actions**, duurt ± 2 minuten).
+5. Geïnstalleerde programma's zien de nieuwe versie bij de volgende start en tonen
    *"Nieuwe versie beschikbaar – Nu bijwerken"*. Eén klik installeert hem en start het programma opnieuw.
 
 Het versienummer komt uit de tag; je hoeft het nergens anders aan te passen.
