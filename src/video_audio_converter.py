@@ -30,7 +30,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 APP_NAME = "Video/Audio Converter"
-APP_VERSION = "2.3.3"   # wordt bij een release automatisch gezet vanuit de git-tag
+APP_VERSION = "2.3.4"   # wordt bij een release automatisch gezet vanuit de git-tag
 
 # GitHub-repository waar nieuwe versies (Releases) van dit programma staan.
 # Moet een openbare repository zijn. Leeg laten = niet controleren op updates.
@@ -271,16 +271,40 @@ def build_playlist_command(url):
 def popen(cmd):
     return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace",
-                            creationflags=CREATE_NO_WINDOW, cwd=BIN_DIR if os.path.isdir(BIN_DIR) else None)
+                            creationflags=CREATE_NO_WINDOW, start_new_session=not IS_WIN,
+                            cwd=BIN_DIR if os.path.isdir(BIN_DIR) else None)
 
 
-def kill_tree(proc):
+def _kill_now(proc):
+    """Stop het proces én alles wat het zelf heeft gestart (bijv. ffmpeg)."""
+    for _ in range(3):
+        if proc.poll() is not None:
+            return
+        try:
+            if IS_WIN:
+                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                               creationflags=CREATE_NO_WINDOW, capture_output=True, timeout=10)
+            else:
+                import signal
+                os.killpg(proc.pid, signal.SIGKILL)
+        except Exception:  # noqa: BLE001
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def kill_tree(proc, wait=False):
+    """Op de achtergrond stoppen, zodat het venster niet bevriest."""
     if proc and proc.poll() is None:
-        if IS_WIN:
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-                           creationflags=CREATE_NO_WINDOW, capture_output=True)
+        if wait:
+            _kill_now(proc)
         else:
-            proc.kill()
+            threading.Thread(target=_kill_now, args=(proc,), daemon=True).start()
 
 
 YT_ID_RE = re.compile(r"(?:youtube\.com/(?:watch\?(?:[^#]*&)?v=|shorts/|live/|embed/)|youtu\.be/)([\w-]{11})")
@@ -404,7 +428,7 @@ class JobRow(ctk.CTkFrame):
 
     def refresh(self):
         j = self.job
-        key = (j.state, round(j.percent, 1), j.detail, j.title, j.error)
+        key = (j.state, round(j.percent, 1), j.detail, j.title, j.error, j.cancelled)
         if key == self._last:
             return
         self._last = key
@@ -413,7 +437,10 @@ class JobRow(ctk.CTkFrame):
         self.icon.configure(text=sym)
         self.title.configure(text=shorten(j.label, 90))
 
-        if j.state == "bezig":
+        if j.state == "bezig" and j.cancelled:
+            self.bar.grid_forget()
+            self.status.configure(text="Bezig met stoppen…", text_color=MUTED)
+        elif j.state == "bezig":
             text = j.detail or default
             self.bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
             self.bar.set(j.percent / 100)
@@ -430,7 +457,9 @@ class JobRow(ctk.CTkFrame):
             else:
                 self.status.configure(text=default, text_color=MUTED)
 
-        self.action.configure(text={"bezig": "Stoppen", "wachten": "Annuleren", "ophalen": "Annuleren",
+        stopping = j.state == "bezig" and j.cancelled
+        self.action.configure(state="disabled" if stopping else "normal")
+        self.action.configure(text="Stoppen…" if stopping else {"bezig": "Stoppen", "wachten": "Annuleren", "ophalen": "Annuleren",
                                     "mislukt": "Opnieuw", "gestopt": "Opnieuw", "gereed": "Tonen"}[j.state])
 
 
@@ -841,6 +870,8 @@ class App(ctk.CTk):
         entries, last_err = [], ""
         try:
             job.proc = popen(build_playlist_command(job.url))
+            if job.cancelled:
+                kill_tree(job.proc)
             for line in job.proc.stdout:
                 line = line.rstrip()
                 if "\t" in line and not line.startswith(("ERROR", "WARNING")):
@@ -858,6 +889,8 @@ class App(ctk.CTk):
         last_err = ""
         try:
             job.proc = popen(build_download_command(job))
+            if job.cancelled:  # al op Stoppen geklikt terwijl hij nog opstartte
+                kill_tree(job.proc)
             for raw in job.proc.stdout:
                 line = raw.rstrip()
                 if not line:
@@ -912,10 +945,11 @@ class App(ctk.CTk):
                     changed.add(job)
                 elif kind == "finished":
                     _, _, code, err = ev
-                    if job.cancelled:
-                        job.state = "gestopt"
-                    elif code == 0:
+                    if code == 0 and not (job.cancelled and not job.filepath):
+                        # was al helemaal klaar vóór de stopklik: dan is het bestand er gewoon
                         job.state, job.percent = "gereed", 100
+                    elif job.cancelled:
+                        job.state = "gestopt"
                     elif "403" in err and not job.retried:
                         # YouTube weigert soms tijdelijk; automatisch één keer opnieuw proberen
                         job.retried = True
@@ -1115,7 +1149,7 @@ class App(ctk.CTk):
         for j in self.jobs:
             if j.state in ("bezig", "ophalen"):
                 j.cancelled = True
-                kill_tree(j.proc)
+                kill_tree(j.proc, wait=True)
         self.persist()
         # stille installatie; de installer start het programma daarna zelf opnieuw
         subprocess.Popen([setup, "/S"], close_fds=True,
@@ -1129,7 +1163,7 @@ class App(ctk.CTk):
         for j in self.jobs:
             if j.state in ("bezig", "ophalen"):
                 j.cancelled = True
-                kill_tree(j.proc)
+                kill_tree(j.proc, wait=True)  # niets laten doorlopen na afsluiten
         self.persist()
         self.destroy()
 
