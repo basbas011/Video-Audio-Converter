@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 import zipfile
 import tkinter as tk
@@ -29,7 +30,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 APP_NAME = "Video/Audio Converter"
-APP_VERSION = "2.3.1"   # wordt bij een release automatisch gezet vanuit de git-tag
+APP_VERSION = "2.3.3"   # wordt bij een release automatisch gezet vanuit de git-tag
 
 # GitHub-repository waar nieuwe versies (Releases) van dit programma staan.
 # Moet een openbare repository zijn. Leeg laten = niet controleren op updates.
@@ -282,6 +283,24 @@ def kill_tree(proc):
             proc.kill()
 
 
+YT_ID_RE = re.compile(r"(?:youtube\.com/(?:watch\?(?:[^#]*&)?v=|shorts/|live/|embed/)|youtu\.be/)([\w-]{11})")
+TRACKING_PARAMS = ("si=", "utm_", "feature=", "t=", "pp=", "fbclid=", "igsh=")
+
+
+def url_key(url):
+    """Zelfde video = zelfde sleutel, ook als de link er net iets anders uitziet
+    (youtu.be vs youtube.com, extra ?si=... enz.)."""
+    url = url.strip()
+    m = YT_ID_RE.search(url)
+    if m:
+        return "yt:" + m.group(1)
+    u = urllib.parse.urlsplit(url if "://" in url else "https://" + url)
+    host = u.netloc.lower()
+    host = host[4:] if host.startswith("www.") else host
+    query = "&".join(sorted(p for p in u.query.split("&") if p and not p.startswith(TRACKING_PARAMS)))
+    return f"{host}{u.path.rstrip('/')}" + (f"?{query}" if query else "")
+
+
 def friendly_error(msg):
     for needle, nl in FRIENDLY_ERRORS:
         if needle.lower() in msg.lower():
@@ -319,6 +338,11 @@ class Job:
         self.cancelled = False
         self.retried = False
         self.row = None
+
+    @property
+    def key(self):
+        """Dezelfde video in hetzelfde formaat (MP4/MP3) = dubbel."""
+        return f"{self.mode}|{url_key(self.url)}"
 
     @property
     def label(self):
@@ -424,6 +448,7 @@ class App(ctk.CTk):
         self.updating = False
         self.update_silent = False
         self.retry_at = {}
+        self._last_add = -10.0
 
         self.title(APP_NAME)
         self.geometry("920x820")
@@ -634,8 +659,14 @@ class App(ctk.CTk):
             text = self.clipboard_get().strip()
         except tk.TclError:
             return
+        if not text:
+            return
         cur = self.links.get("1.0", "end").strip()
-        self.links.insert("end", ("\n" if cur else "") + text)
+        existing = {url_key(u) for u in cur.splitlines() if u.strip()}
+        new = [u.strip() for u in text.splitlines() if u.strip() and url_key(u) not in existing]
+        if not new:
+            return  # staat er al: niet nog een keer toevoegen
+        self.links.insert("end", ("\n" if cur else "") + "\n".join(new))
 
     def browse(self):
         path = filedialog.askdirectory(initialdir=self.outdir.get() or None, title="Kies een map")
@@ -659,6 +690,9 @@ class App(ctk.CTk):
 
     # ---- taken ----------------------------------------------------------- #
     def add_links(self):
+        if self._now() - self._last_add < 1.0:
+            return  # dubbelklik op Downloaden negeren
+        self._last_add = self._now()
         if not self.ready:
             messagebox.showinfo(APP_NAME, "Even geduld, de benodigde onderdelen worden nog gedownload.")
             return
@@ -674,13 +708,32 @@ class App(ctk.CTk):
             return
         self.persist()
         expand = self.playlist.get() == "Hele afspeellijst"
+        added = skipped = 0
         for url in urls:
             job = Job(url, self.mode.get(), self.quality.get(), outdir, expand=expand)
+            existing = self._find_existing(job.key)
+            if existing is not None:
+                skipped += 1
+                if existing.state in ("mislukt", "gestopt"):
+                    self.retry_job(existing)  # bestaande regel opnieuw i.p.v. een tweede regel
+                continue
             self._add_job(job)
+            added += 1
             if expand:
                 threading.Thread(target=self.expand_worker, args=(job,), daemon=True).start()
         self.links.delete("1.0", "end")
         self.update_summary()
+        if skipped and not added:
+            messagebox.showinfo(APP_NAME, "Deze video staat al in de lijst." if skipped == 1
+                                else f"Deze {skipped} video's staan al in de lijst.")
+        elif skipped:
+            self.foot_lbl.configure(text=f"{skipped} dubbele link(s) overgeslagen")
+
+    def _find_existing(self, key):
+        for j in self.jobs:
+            if j.key == key:
+                return j
+        return None
 
     def _add_job(self, job, after=None):
         if self.empty.winfo_manager():
@@ -906,7 +959,8 @@ class App(ctk.CTk):
             for j in self.jobs:
                 if running >= limit:
                     break
-                if j.state == "wachten" and self.retry_at.get(j.id, 0) <= self._now():
+                if (j.state == "wachten" and self.retry_at.get(j.id, 0) <= self._now()
+                        and not any(o.state == "bezig" and o.key == j.key for o in self.jobs)):
                     self.retry_at.pop(j.id, None)
                     self.start_job(j)
                     running += 1
@@ -940,9 +994,12 @@ class App(ctk.CTk):
             job.state = "wachten"
             job.row.refresh()
             return
-        prev = job
+        prev, seen = job, set()
         for url, title in entries:
             new = Job(url, job.mode, job.quality, job.outdir, title=title)
+            if new.key in seen or self._find_existing(new.key) not in (None, job):
+                continue  # zelfde video staat al in de lijst (of twee keer in de playlist)
+            seen.add(new.key)
             self._add_job(new, after=prev)
             prev = new
         self._remove_job(job)
@@ -1077,7 +1134,31 @@ class App(ctk.CTk):
         self.destroy()
 
 
+_INSTANCE_MUTEX = None
+
+
+def already_running():
+    """Voorkomt dat het programma twee keer tegelijk open staat."""
+    global _INSTANCE_MUTEX
+    if not IS_WIN:
+        return False
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        _INSTANCE_MUTEX = kernel32.CreateMutexW(None, False, "Local\\VideoAudioConverter.EenKeer")
+        return kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def main():
+    if already_running():
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showinfo(APP_NAME, "Video/Audio Converter is al geopend.\n\n"
+                                      "Kijk onderin op de taakbalk.")
+        root.destroy()
+        return
     if IS_WIN:
         try:  # eigen icoon in de taakbalk i.p.v. het Python-icoon
             import ctypes
